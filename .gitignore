@@ -1,0 +1,29 @@
+# Dependencias
+node_modules/
+vendor/
+
+# Builds y artefactos
+dist/
+build/
+target/
+.vite/
+
+# Entorno local y secretos
+.env
+.env.*
+!.env.example
+
+# Sistema/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
+
+# Documentación operativa/local de este entorno
+.atl/
+openspec/
+README_DEPLOY.md
+spec.md
