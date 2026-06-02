@@ -2,6 +2,17 @@ import type { CommandStatus, ManagedProject, ServiceConfig, ServiceKind, SmartLa
 
 export type PortState = 'ok' | 'reassigned' | 'manual';
 
+/** Keep a user's URL (including its path, e.g. /app/) but point it at the assigned port. */
+function withAssignedPort(rawUrl: string, port: number): string {
+  try {
+    const u = new URL(rawUrl);
+    u.port = String(port);
+    return u.toString();
+  } catch {
+    return rawUrl;
+  }
+}
+
 export type ServiceView = {
   id: string;
   commandId: string;
@@ -43,6 +54,15 @@ export function toServiceView(
 
   const warnings = planned?.warnings ?? [];
 
+  // Web-facing services should have a URL even when none was stored (AI plans omit it).
+  // Derive it from the live/assigned port so Work Mode can open the right address.
+  const webFacing = service.kind === 'backend' || service.kind === 'frontend';
+  let url = service.url;
+  if (webFacing && assignedPort) {
+    // Respect a user-set URL (keep its path like /app/) but reflect the assigned port.
+    url = service.url ? withAssignedPort(service.url, assignedPort) : `http://localhost:${assignedPort}`;
+  }
+
   return {
     id: service.id,
     commandId: cmd.id,
@@ -52,7 +72,7 @@ export function toServiceView(
     executable: cmd.executable,
     args: cmd.args ?? [],
     cwd: cmd.workingDirectory,
-    url: service.url,
+    url,
     risky: cmd.risky ?? false,
     enabled: service.enabled,
     preferredPort: cmd.preferredPort,

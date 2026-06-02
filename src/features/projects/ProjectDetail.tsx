@@ -29,7 +29,7 @@ function PortBadge({ s }: { s: ServiceView }) {
   return <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-ghost)' }}>—</span>;
 }
 
-function ServiceItem({ s, error, selected, onSelect, onToggle, onEdit, onOpenUrl }: { s: ServiceView; error?: string; selected: boolean; onSelect: () => void; onToggle: () => void; onEdit: () => void; onOpenUrl: () => void }) {
+function ServiceItem({ s, error, liveUrl, selected, onSelect, onToggle, onEdit, onOpenUrl }: { s: ServiceView; error?: string; liveUrl?: string; selected: boolean; onSelect: () => void; onToggle: () => void; onEdit: () => void; onOpenUrl: () => void }) {
   const [hover, setHover] = useState(false);
   const running = s.status === 'running';
   const busy = s.status === 'starting';
@@ -66,8 +66,8 @@ function ServiceItem({ s, error, selected, onSelect, onToggle, onEdit, onOpenUrl
           {s.executable} {s.args.join(' ')}
         </code>
         <PortBadge s={s} />
-        {s.url && running && (
-          <button onClick={(e) => { e.stopPropagation(); onOpenUrl(); }} title={s.url} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--brand-bright)', fontWeight: 600, background: 'none' }}>
+        {liveUrl && running && (
+          <button onClick={(e) => { e.stopPropagation(); onOpenUrl(); }} title={liveUrl} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--brand-bright)', fontWeight: 600, background: 'none' }}>
             <Icon name="external" size={12} />abrir
           </button>
         )}
@@ -160,7 +160,7 @@ type Props = {
 };
 
 export function ProjectDetail({ project, onBack, onEditService, onWork, onDelete, onSnapshot, onToast }: Props) {
-  const { statusOf, errorOf, tick } = useRuntime();
+  const { statusOf, errorOf, detectedUrlOf, tick } = useRuntime();
   const [plan, setPlan] = useState<SmartLaunchPlan | null>(null);
   const [menu, setMenu] = useState(false);
   const [selId, setSelId] = useState(project.services[0]?.id);
@@ -272,11 +272,12 @@ export function ProjectDetail({ project, onBack, onEditService, onWork, onDelete
                 key={s.id}
                 s={s}
                 error={errorOf(project.id, s.commandId)}
+                liveUrl={detectedUrlOf(project.id, s.commandId) ?? s.url}
                 selected={s.id === selId}
                 onSelect={() => setSelId(s.id)}
                 onToggle={() => toggle(s)}
                 onEdit={() => onEditService(s.id)}
-                onOpenUrl={() => s.url && guard(() => openUrl(s.url!))}
+                onOpenUrl={() => { const u = detectedUrlOf(project.id, s.commandId) ?? s.url; if (u) guard(() => openUrl(u)); }}
               />
             ))}
           </div>

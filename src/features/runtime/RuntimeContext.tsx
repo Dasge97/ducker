@@ -13,6 +13,8 @@ type LogEvent = { projectId: string; commandId: string; line: string };
 type RuntimeValue = {
   statusOf: (projectId: string, commandId: string) => CommandStatus;
   errorOf: (projectId: string, commandId: string) => string | undefined;
+  /** URL a service announced in its logs (e.g. Symfony "Listening on http://127.0.0.1:8000"). */
+  detectedUrlOf: (projectId: string, commandId: string) => string | undefined;
   logsOf: (projectId: string, commandId: string) => LogLine[];
   clearLogs: (projectId: string, commandId: string) => void;
   /** Increments whenever any status/log changes, so consumers can re-render. */
@@ -42,6 +44,7 @@ function nowTs(): string {
 export function RuntimeProvider({ children }: { children: ReactNode }) {
   const statuses = useRef<Record<string, CommandExecutionState>>({});
   const logs = useRef<Record<string, LogLine[]>>({});
+  const detectedUrls = useRef<Record<string, string>>({});
   const logId = useRef(1);
   const [tick, setTick] = useState(0);
   const bump = () => setTick((t) => (t + 1) % 1_000_000);
@@ -56,6 +59,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       const list = logs.current[k] ?? (logs.current[k] = []);
       list.push({ id: logId.current++, level: classify(payload.line), ts: nowTs(), text: payload.line });
       if (list.length > 500) list.splice(0, list.length - 500);
+      // Detect the real URL a server announces (Symfony, Vite, Next… all print one).
+      const m = payload.line.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?/i);
+      if (m) detectedUrls.current[k] = m[0].replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost');
       bump();
     });
     return () => {
@@ -67,6 +73,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const value: RuntimeValue = {
     statusOf: (p, c) => statuses.current[keyOf(p, c)]?.status ?? 'idle',
     errorOf: (p, c) => statuses.current[keyOf(p, c)]?.error || undefined,
+    detectedUrlOf: (p, c) => detectedUrls.current[keyOf(p, c)],
     logsOf: (p, c) => logs.current[keyOf(p, c)] ?? [],
     clearLogs: (p, c) => {
       logs.current[keyOf(p, c)] = [];

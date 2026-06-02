@@ -126,6 +126,60 @@ fn port_reachable(port: u16) -> bool {
     TcpStream::connect(("127.0.0.1", port)).is_ok()
 }
 
+/// The Symfony local server is a self-managed daemon (one per directory): a second
+/// `server:start` just reports "already running" and ignores the requested port. We detect
+/// that command so we can stop any stale server first and stop it cleanly afterwards.
+fn is_symfony_serve(command: &CommandConfig) -> bool {
+    command.executable.to_lowercase().contains("symfony")
+        && command.args.iter().any(|a| a == "server:start" || a == "serve")
+}
+
+/// Remove Symfony's stale per-project server state. Symfony records the last port in
+/// ~/.symfony5/var/<hash>.pid and, on the next `server:start`, "reuses" it if *anything* answers
+/// there — even an unrelated process (e.g. another project's Docker container on that port).
+/// Clearing it for this project only (matched by directory) makes `server:start` honor our port.
+fn clear_symfony_registry(project_dir: &str) {
+    use std::path::Path;
+    let home = match std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
+        Some(h) => h,
+        None => return,
+    };
+    let var_dir = Path::new(&home).join(".symfony5").join("var");
+    let entries = match std::fs::read_dir(&var_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let target = std::fs::canonicalize(project_dir).ok();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("pid") {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let dir = serde_json::from_str::<serde_json::Value>(&content)
+            .ok()
+            .and_then(|v| v.get("dir").and_then(|d| d.as_str()).map(str::to_string));
+        let Some(dir) = dir else { continue };
+        let same = (std::fs::canonicalize(&dir).ok() == target && target.is_some()) || dir.eq_ignore_ascii_case(project_dir);
+        if same {
+            let _ = std::fs::remove_file(&path);
+            if let Some(stem) = path.file_stem() {
+                let _ = std::fs::remove_dir_all(var_dir.join(stem));
+            }
+        }
+    }
+}
+
+fn symfony_server_stop(cwd: &str) {
+    // Stop any live server for this directory…
+    let mut c = Command::new(resolve_program("symfony"));
+    c.args(["server:stop"]).current_dir(cwd);
+    hide_window(&mut c);
+    let _ = c.status();
+    // …then drop its (possibly stale) registry entry so the next start picks the requested port.
+    clear_symfony_registry(cwd);
+}
+
 /// Resolve a command's working directory against the project root. AI/manual commands often
 /// store "." (or a relative subpath); without this they'd run in Ducker's own directory.
 fn resolve_cwd(working_directory: &str, project_root: &str) -> String {
@@ -169,6 +223,10 @@ pub fn start(process_state: &ProcessState, app: &AppHandle, projects: &[ManagedP
 
 pub fn start_with_command(process_state: &ProcessState, app: &AppHandle, project_id: &str, command_id: &str, command: &CommandConfig, project_root: &str) -> Result<CommandExecutionState, String> {
     let resolved_cwd = resolve_cwd(&command.working_directory, project_root);
+    // Clear any stale Symfony server for this directory so our chosen port is actually used.
+    if is_symfony_serve(command) {
+        symfony_server_stop(&resolved_cwd);
+    }
     let mut command_builder = Command::new(resolve_program(&command.executable));
     command_builder
         .args(&command.args)
@@ -321,20 +379,29 @@ pub fn start_with_command(process_state: &ProcessState, app: &AppHandle, project
 pub fn stop(process_state: &ProcessState, app: &AppHandle, projects: &[ManagedProject], project_id: &str, command_id: &str) -> Result<CommandExecutionState, String> {
     let project = projects.iter().find(|p| p.id == project_id).ok_or("Project not found")?;
     let command = project.services.iter().map(|s| &s.command).find(|c| c.id == command_id).ok_or("Command not found")?;
+
+    // Mark "stopped" up-front so the process-exit watcher doesn't relabel this user-initiated
+    // stop as "failed" when the killed process reports a non-zero exit code.
+    let mut status = get_log(process_state, project_id, command_id);
+    status.status = "stopped".to_string();
+    status.finished_at = Some(now());
+    process_state.statuses.lock().map_err(|_| "lock")?.insert(key(project_id, command_id), status.clone());
+    emit_status(app, project_id, &status);
+
+    // Kill the tracked process tree first (stops the foreground server + worker cleanly).
+    if let Some(pid) = process_state.children.lock().map_err(|_| "lock")?.remove(&key(project_id, command_id)) {
+        let _ = terminate_pid(pid);
+    }
+    // Cleanup: explicit stop command, then Symfony's daemon/registry.
     if let Some(stop_command) = &command.stop_command {
         let mut c = Command::new(resolve_program(&stop_command.executable));
         c.args(&stop_command.args).current_dir(resolve_cwd(&stop_command.working_directory, &project.path));
         hide_window(&mut c);
         let _ = c.status();
     }
-    if let Some(pid) = process_state.children.lock().map_err(|_| "lock")?.remove(&key(project_id, command_id)) {
-        let _ = terminate_pid(pid);
+    if is_symfony_serve(command) {
+        symfony_server_stop(&resolve_cwd(&command.working_directory, &project.path));
     }
-    let mut status = get_log(process_state, project_id, command_id);
-    status.status = "stopped".to_string();
-    status.finished_at = Some(now());
-    process_state.statuses.lock().map_err(|_| "lock")?.insert(key(project_id, command_id), status.clone());
-    emit_status(app, project_id, &status);
     Ok(status)
 }
 

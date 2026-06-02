@@ -85,3 +85,9 @@ export async function planSmartLaunch(projectId: string): Promise<SmartLaunchPla
 export async function startSmartLaunch(projectId: string): Promise<SmartLaunchPlan> {
   return invoke<SmartLaunchPlan>('start_smart_launch', { projectId });
 }
+
+export type PortInfo = { port: number; pid: number; process: string };
+
+export async function listPorts(): Promise<PortInfo[]> {
+  return invoke<PortInfo[]>('list_ports');
+}

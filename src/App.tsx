@@ -12,6 +12,7 @@ import { CommandEditor } from './features/projects/CommandEditor';
 import { SnapshotReview } from './features/projects/SnapshotReview';
 import { WorkMode } from './features/projects/WorkMode';
 import { SettingsView } from './features/settings/SettingsView';
+import { PortsView } from './features/diagnostics/PortsView';
 import { Titlebar } from './ui/Titlebar';
 import { IconButton } from './ui/primitives';
 import { Icon, type IconName } from './ui/icons';
@@ -19,7 +20,7 @@ import { CommandPalette, type Command } from './ui/CommandPalette';
 import { ConfirmDialog } from './ui/overlays';
 import { useRuntime } from './features/runtime/RuntimeContext';
 
-type Route = 'projects' | 'detail' | 'settings';
+type Route = 'projects' | 'detail' | 'settings' | 'ports';
 type Modal =
   | { type: 'add' }
   | { type: 'cmd'; projectId: string; serviceId: string }
@@ -129,13 +130,16 @@ export function App() {
       {projectsError && <div className="app-error-bar"><span>Project error: {projectsError}</span></div>}
       <div className="app-body">
         <nav className="rail">
-          <RailButton icon="folder" label="Proyectos" active={route !== 'settings'} onClick={goProjects} />
+          <RailButton icon="folder" label="Proyectos" active={route === 'projects' || route === 'detail'} onClick={goProjects} />
           <RailButton icon="bolt" label="Work Mode" active={false} onClick={() => { if (current) setModal({ type: 'work', project: current }); else setPalette(true); }} />
+          <RailButton icon="port" label="Puertos" active={route === 'ports'} onClick={() => { setCurId(null); setRoute('ports'); }} />
           <div style={{ flex: 1 }} />
           <RailButton icon="gear" label="Settings" active={route === 'settings'} onClick={() => setRoute('settings')} />
         </nav>
         <main className="app-main" key={route + (curId ?? '')}>
-          {route === 'settings' ? (
+          {route === 'ports' ? (
+            <PortsView />
+          ) : route === 'settings' ? (
             <SettingsView onSaved={setSettings} appInfo={appInfo ? `${appInfo.name} ${appInfo.version}` : undefined} />
           ) : route === 'detail' && current ? (
             <ProjectDetail

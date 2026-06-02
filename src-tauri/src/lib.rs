@@ -1,5 +1,6 @@
 mod detection;
 mod ai_client;
+mod diagnostics;
 mod models;
 mod os_actions;
 mod port_planner;
@@ -8,6 +9,8 @@ mod processes;
 mod storage;
 
 use std::sync::Mutex;
+
+use tauri::Manager;
 
 use models::{AnalyzeProjectWithAiResult, AppSettings, CommandExecutionState, DetectProjectResult, ManagedProject, SmartLaunchPlan, SnapshotSummary};
 use port_planner::PortRegistry;
@@ -102,6 +105,8 @@ fn plan_smart_launch(app: tauri::AppHandle, state: tauri::State<'_, AppState>, p
 fn start_smart_launch(state: tauri::State<'_, AppState>, app: tauri::AppHandle, project_id: String) -> Result<SmartLaunchPlan, String> {
     let projects = storage::load_projects(&app)?;
     let project = projects.iter().find(|p| p.id == project_id).ok_or("Project not found")?;
+    // Drop any stale reservations from a previous launch so ports are reused, not incremented.
+    port_planner::release_project(&project_id, &state.port_registry);
     let plan = port_planner::plan_launch(project, &state.port_registry, true);
     if plan.blocked {
         return Ok(plan);
@@ -130,6 +135,7 @@ fn start_command(state: tauri::State<'_, AppState>, app: tauri::AppHandle, proje
     // not just "Work mode" — otherwise it would clash on the original port.
     if project.smart_ports_enabled == Some(true) {
         let command = project.services.iter().map(|s| &s.command).find(|c| c.id == command_id).ok_or("Command not found")?;
+        port_planner::release_command(&project_id, &command_id, &state.port_registry);
         let plan = port_planner::plan_command(&project.id, command, &state.port_registry, true);
         if plan.blocked {
             port_planner::release_command(&project_id, &command_id, &state.port_registry);
@@ -175,10 +181,30 @@ fn open_folder(app: tauri::AppHandle, project_id: String) -> Result<(), String> 
 #[tauri::command]
 fn open_url(url: String) -> Result<(), String> { os_actions::open_url(&url) }
 
+#[tauri::command]
+fn list_ports() -> Result<Vec<diagnostics::PortInfo>, String> { diagnostics::list_listening_ports() }
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .on_window_event(|window, event| {
+            // Stop every running service when the app closes, so nothing (e.g. the Symfony
+            // daemon) is left orphaned in the background.
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                let app = window.app_handle();
+                if let Ok(projects) = storage::load_projects(app) {
+                    let state = app.state::<AppState>();
+                    let keys: Vec<String> = state.process_state.children.lock().map(|m| m.keys().cloned().collect()).unwrap_or_default();
+                    for k in keys {
+                        if let Some((project_id, command_id)) = k.split_once(':') {
+                            let _ = processes::stop(&state.process_state, app, &projects, project_id, command_id);
+                            port_planner::release_command(project_id, command_id, &state.port_registry);
+                        }
+                    }
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_app_info,
             list_projects,
@@ -197,7 +223,8 @@ pub fn run() {
             get_command_log,
             open_editor,
             open_folder,
-            open_url
+            open_url,
+            list_ports
         ])
         .run(tauri::generate_context!())
         .expect("error while running Ducker");

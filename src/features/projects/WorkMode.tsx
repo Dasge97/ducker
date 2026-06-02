@@ -24,7 +24,7 @@ function summaryLine(icon: IconName, title: string, sub: string) {
 }
 
 export function WorkMode({ project, settings, onClose, onLaunched }: { project: ManagedProject; settings: AppSettings; onClose: () => void; onLaunched: (p: ManagedProject) => void }) {
-  const { statusOf } = useRuntime();
+  const { statusOf, detectedUrlOf } = useRuntime();
   const [plan, setPlan] = useState<SmartLaunchPlan | null>(null);
   const [ack, setAck] = useState(false);
   const [launching, setLaunching] = useState(false);
@@ -43,6 +43,16 @@ export function WorkMode({ project, settings, onClose, onLaunched }: { project: 
   const needAck = risky.length > 0 && settings.confirmRiskyCommands;
   const canLaunch = !blocked && (!needAck || ack);
 
+  // Poll the logs (up to ~12s) for the URL the service announces, then fall back.
+  const waitForUrl = async (commandId: string, fallback?: string): Promise<string | undefined> => {
+    for (let i = 0; i < 40; i++) {
+      const detected = detectedUrlOf(project.id, commandId);
+      if (detected) return detected;
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+    return fallback;
+  };
+
   const launch = async () => {
     setLaunching(true);
     setError(null);
@@ -55,11 +65,14 @@ export function WorkMode({ project, settings, onClose, onLaunched }: { project: 
       } else {
         for (const s of enabled) await startCommand(project.id, s.commandId);
       }
+      // Open the URL the service actually announces in its logs (handles Symfony/Vite/Next
+      // choosing or auto-incrementing their own port), falling back to the configured URL.
       for (const s of view.services) {
-        if (!s.url) continue;
+        if (s.kind !== 'backend' && s.kind !== 'frontend') continue;
         if (s.kind === 'backend' && !settings.openBackendUrlOnWorkMode) continue;
         if (s.kind === 'frontend' && !settings.openFrontendUrlOnWorkMode) continue;
-        await openUrl(s.url);
+        const url = await waitForUrl(s.commandId, s.url);
+        if (url) await openUrl(url);
       }
       onLaunched(project);
     } catch (e) {
