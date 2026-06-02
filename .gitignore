@@ -28,6 +28,9 @@ openspec/
 README_DEPLOY.md
 spec.md
 
+# Acceso directo local al ejecutable (ruta específica de la máquina)
+*.lnk
+
 # Tauri (generado en build)
 /src-tauri/gen/
 

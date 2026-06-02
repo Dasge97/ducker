@@ -33,8 +33,8 @@ export function Titlebar({ runningCount, onOpenPalette }: Props) {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <div className="titlebar-brand">
-        <img src="/ducker-logo.png" width={20} height={20} alt="" style={{ objectFit: 'contain' }} />
-        <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: '-0.01em' }}>Ducker</span>
+        <img src="/ducker-mark.png" alt="Ducker" className="titlebar-logo" />
+        <span className="titlebar-name">Ducker</span>
       </div>
 
       <button className="titlebar-search" onClick={onOpenPalette}>

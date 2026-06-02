@@ -159,6 +159,8 @@ export function App() {
         </main>
       </div>
 
+      <div className="app-watermark" aria-hidden />
+
       {palette && <CommandPalette commands={commands} onClose={() => setPalette(false)} />}
       {modal?.type === 'add' && <AddProjectWizard onClose={closeModal} onSave={onSaveNew} onOpenSnapshot={(path) => setModal({ type: 'snapshot', path })} aiReady={!!(settings?.ai.enabled && settings?.ai.apiKeyConfigured)} />}
       {modal?.type === 'snapshot' && <SnapshotReview path={modal.path} onClose={closeModal} />}
