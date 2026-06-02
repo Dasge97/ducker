@@ -1,6 +1,8 @@
 # Ducker
 
-![Ducker logo](assets/Logo-ducker.PNG)
+<p align="center">
+  <img src="assets/Logo-ducker.PNG" alt="Ducker logo" width="40%" />
+</p>
 
 **Ducker** es una aplicación local de escritorio para gestionar proyectos Symfony/Yarn desde una interfaz visual.
 
