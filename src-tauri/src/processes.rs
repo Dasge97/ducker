@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, VecDeque}, io::{BufRead, BufReader}, process::{Command, Stdio}, sync::{Arc, Mutex}, thread};
 
 use crate::models::{CommandExecutionState, ManagedProject};
+use crate::models::CommandConfig;
 
 #[derive(Clone, Default)]
 pub struct ProcessState {
@@ -43,12 +44,20 @@ fn terminate_pid(pid: u32) -> Result<(), String> {
 pub fn start(process_state: &ProcessState, projects: &[ManagedProject], project_id: &str, command_id: &str) -> Result<CommandExecutionState, String> {
     let project = projects.iter().find(|p| p.id == project_id).ok_or("Project not found")?;
     let command = [project.backend.as_ref(), project.frontend.as_ref()].into_iter().flatten().find(|c| c.id == command_id).ok_or("Command not found")?;
-    let mut child = Command::new(&command.executable)
+    start_with_command(process_state, project_id, command_id, command)
+}
+
+pub fn start_with_command(process_state: &ProcessState, project_id: &str, command_id: &str, command: &CommandConfig) -> Result<CommandExecutionState, String> {
+    let mut command_builder = Command::new(&command.executable);
+    command_builder
         .args(&command.args)
         .current_dir(&command.working_directory)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn().map_err(|e| e.to_string())?;
+        .stderr(Stdio::piped());
+    if let Some(env) = &command.env {
+        command_builder.envs(env);
+    }
+    let mut child = command_builder.spawn().map_err(|e| e.to_string())?;
     let child_id = child.id();
     let k = key(project_id, command_id);
     process_state.children.lock().map_err(|_| "lock")?.insert(k.clone(), child_id);

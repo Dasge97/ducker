@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { ManagedProject, CommandConfig, ProjectDetection } from '../../domain/projects';
-import { detectProject } from '../../services/native';
+import type { ManagedProject, CommandConfig, ProjectDetection, AnalyzeProjectWithAiResult, ServicePlan, SnapshotSummary } from '../../domain/projects';
+import { analyzeProjectSnapshotWithAi, collectProjectSnapshot, detectProject } from '../../services/native';
 
 type Props = {
   onSubmit: (project: ManagedProject) => Promise<void>;
@@ -58,6 +58,11 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
   const [frontendUrl, setFrontendUrl] = useState('');
   const [frontendRisky, setFrontendRisky] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiResult, setAiResult] = useState<AnalyzeProjectWithAiResult | null>(null);
+  const [snapshotPreview, setSnapshotPreview] = useState<SnapshotSummary | null>(null);
+  const [smartPortsEnabled, setSmartPortsEnabled] = useState(false);
+  const [backendAiCommand, setBackendAiCommand] = useState<CommandConfig | undefined>();
+  const [frontendAiCommand, setFrontendAiCommand] = useState<CommandConfig | undefined>();
 
   useEffect(() => {
     if (!editingProject) return;
@@ -72,6 +77,11 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
     setFrontendArgs(commandToArgsText(editingProject.frontend));
     setFrontendUrl(editingProject.urls.frontend ?? '');
     setFrontendRisky(editingProject.frontend?.risky ?? false);
+    setSmartPortsEnabled(editingProject.smartPortsEnabled ?? false);
+    setAiResult(editingProject.stackPlan ? {
+      snapshot: { rootPath: editingProject.path, includedFiles: [], omittedFiles: [], manifests: {}, scripts: {} },
+      plan: editingProject.stackPlan,
+    } : null);
   }, [editingProject]);
 
   const fillDetection = async () => {
@@ -97,10 +107,10 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
     event.preventDefault();
     const now = Date.now().toString();
     const backend = backendExecutable.trim()
-      ? mkCommand('backend', 'Backend Symfony', backendExecutable.trim(), backendArgs, path, 'symfony-backend', backendRisky)
+      ? { ...mkCommand('backend', 'Backend Symfony', backendExecutable.trim(), backendArgs, path, 'symfony-backend', backendRisky), preferredPort: backendAiCommand?.preferredPort, portStrategy: backendAiCommand?.portStrategy ?? 'argument', origin: aiResult ? 'ai' as const : 'manual' as const, overriddenByUser: aiResult ? commandToArgsText(backendAiCommand) !== backendArgs || backendAiCommand?.executable !== backendExecutable.trim() : false }
       : undefined;
     const frontend = frontendExecutable.trim()
-      ? mkCommand('frontend', 'Frontend Yarn', frontendExecutable.trim(), frontendArgs, path, 'yarn-frontend', frontendRisky)
+      ? { ...mkCommand('frontend', 'Frontend Yarn', frontendExecutable.trim(), frontendArgs, path, 'yarn-frontend', frontendRisky), preferredPort: frontendAiCommand?.preferredPort, portStrategy: frontendAiCommand?.portStrategy ?? 'argument', origin: aiResult ? 'ai' as const : 'manual' as const, overriddenByUser: aiResult ? commandToArgsText(frontendAiCommand) !== frontendArgs || frontendAiCommand?.executable !== frontendExecutable.trim() : false }
       : undefined;
     await onSubmit({
       id: editingProject?.id ?? `project-${now}`,
@@ -111,6 +121,9 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
       urls: { backend: backendUrl || undefined, frontend: frontendUrl || undefined },
       detection,
       runtime: editingProject?.runtime,
+      smartPortsEnabled,
+      stackPlan: aiResult?.plan,
+      aiMetadata: aiResult ? { origin: 'ai', confidence: aiResult.plan.confidence, assumptions: aiResult.plan.assumptions } : { origin: 'manual' },
     });
     setName('');
     setPath('');
@@ -123,7 +136,53 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
     setFrontendArgs('');
     setFrontendUrl('');
     setFrontendRisky(false);
+    setAiResult(null);
+    setSnapshotPreview(null);
+    setBackendAiCommand(undefined);
+    setFrontendAiCommand(undefined);
+    setSmartPortsEnabled(false);
     onCancelEdit?.();
+  };
+
+  const applyServiceSuggestion = (service: ServicePlan) => {
+    const command = service.command;
+    if (service.kind === 'backend') {
+      setBackendExecutable(command.executable);
+      setBackendArgs(commandToArgsText(command));
+      setBackendRisky(command.risky ?? false);
+      setBackendAiCommand({ ...command, preferredPort: service.preferredPort ?? command.preferredPort, portStrategy: service.portStrategy ?? command.portStrategy });
+    }
+    if (service.kind === 'frontend') {
+      setFrontendExecutable(command.executable);
+      setFrontendArgs(commandToArgsText(command));
+      setFrontendRisky(command.risky ?? false);
+      setFrontendAiCommand({ ...command, preferredPort: service.preferredPort ?? command.preferredPort, portStrategy: service.portStrategy ?? command.portStrategy });
+    }
+  };
+
+  const previewSnapshot = async () => {
+    setError(null);
+    try {
+      setSnapshotPreview(await collectProjectSnapshot(path));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const runAiAnalyze = async () => {
+    setError(null);
+    if (!snapshotPreview) {
+      setError('Primero revisa el snapshot que se enviará a la IA.');
+      return;
+    }
+    try {
+      const result = await analyzeProjectSnapshotWithAi(snapshotPreview);
+      setAiResult(result);
+      result.plan.services.forEach(applyServiceSuggestion);
+      setSmartPortsEnabled(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   return (
@@ -132,6 +191,31 @@ export function ProjectForm({ onSubmit, editingProject, onCancelEdit }: Props) {
       <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Nombre" required />
       <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="Ruta local" required />
       <button type="button" onClick={fillDetection}>Detectar Symfony/Yarn</button>
+      <button type="button" onClick={previewSnapshot}>Previsualizar snapshot IA</button>
+      <button type="button" onClick={runAiAnalyze}>Analyze with AI</button>
+      <label><input type="checkbox" checked={smartPortsEnabled} onChange={(e) => setSmartPortsEnabled(e.target.checked)} /> Smart ports enabled</label>
+      {snapshotPreview ? (
+        <section className="panel">
+          <h3>Snapshot que se enviará a IA</h3>
+          <p className="muted">Incluidos: {snapshotPreview.includedFiles.length} · Omitidos: {snapshotPreview.omittedFiles.length}</p>
+          <details><summary>Archivos incluidos</summary><pre>{snapshotPreview.includedFiles.join('\n')}</pre></details>
+          <details><summary>Archivos omitidos</summary><pre>{snapshotPreview.omittedFiles.join('\n')}</pre></details>
+          <details><summary>Manifiestos enviados</summary><pre>{Object.entries(snapshotPreview.manifests).map(([file, content]) => `${file}\n${content}`).join('\n\n')}</pre></details>
+          <details><summary>Scripts enviados</summary><pre>{Object.entries(snapshotPreview.scripts).map(([file, scripts]) => `${file}\n${scripts.join('\n')}`).join('\n\n')}</pre></details>
+          <p className="muted">No se envía código fuente completo por defecto.</p>
+        </section>
+      ) : null}
+      {aiResult ? (
+        <section className="panel">
+          <h3>AI snapshot summary</h3>
+          <p className="muted">Incluidos: {aiResult.snapshot.includedFiles.length} · Omitidos: {aiResult.snapshot.omittedFiles.length}</p>
+          <details><summary>Archivos omitidos</summary><pre>{aiResult.snapshot.omittedFiles.join('\n')}</pre></details>
+          <h3>AI plan: {aiResult.plan.stackName}</h3>
+          <p className="muted">Confidence: {aiResult.plan.confidence}</p>
+          {aiResult.plan.assumptions.length ? <pre>{aiResult.plan.assumptions.join('\n')}</pre> : null}
+          {aiResult.plan.warnings.length ? <pre>{aiResult.plan.warnings.join('\n')}</pre> : null}
+        </section>
+      ) : null}
       <fieldset>
         <legend>Backend Symfony</legend>
         <input value={backendExecutable} onChange={(e) => setBackendExecutable(e.target.value)} placeholder="Ejecutable, ej: symfony" />

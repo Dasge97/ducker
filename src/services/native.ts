@@ -1,5 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { ManagedProject, DetectProjectResult, CommandExecutionState } from '../domain/projects';
+import type {
+  ManagedProject,
+  DetectProjectResult,
+  CommandExecutionState,
+  AnalyzeProjectWithAiResult,
+  SmartLaunchPlan,
+  SnapshotSummary,
+} from '../domain/projects';
 import type { AppSettings } from '../domain/settings';
 
 export type AppInfo = {
@@ -57,4 +64,24 @@ export async function loadSettings(): Promise<AppSettings> {
 
 export async function saveSettings(settings: AppSettings): Promise<AppSettings> {
   return invoke<AppSettings>('save_settings', { settings });
+}
+
+export async function analyzeProjectWithAi(path: string): Promise<AnalyzeProjectWithAiResult> {
+  return invoke<AnalyzeProjectWithAiResult>('analyze_project_with_ai', { path });
+}
+
+export async function analyzeProjectSnapshotWithAi(snapshot: SnapshotSummary): Promise<AnalyzeProjectWithAiResult> {
+  return invoke<AnalyzeProjectWithAiResult>('analyze_project_snapshot_with_ai', { snapshot });
+}
+
+export async function collectProjectSnapshot(path: string): Promise<SnapshotSummary> {
+  return invoke<SnapshotSummary>('collect_project_snapshot', { path });
+}
+
+export async function planSmartLaunch(projectId: string): Promise<SmartLaunchPlan> {
+  return invoke<SmartLaunchPlan>('plan_smart_launch', { projectId });
+}
+
+export async function startSmartLaunch(projectId: string): Promise<SmartLaunchPlan> {
+  return invoke<SmartLaunchPlan>('start_smart_launch', { projectId });
 }

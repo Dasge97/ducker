@@ -53,6 +53,15 @@ Ducker busca convertir todo eso en un dashboard local: proyectos, estado y accio
   - abrir URLs configuradas.
 - Settings básicos.
 - Confirmaciones para acciones destructivas o comandos marcados como arriesgados.
+- AI advisor (OpenAI-compatible):
+  - configuración de provider/baseUrl/model;
+  - API key guardada localmente en modo pragmático v2 (enmascarada en UI, no se devuelve en claro);
+  - snapshot con privacidad por defecto (sin código fuente completo ni ficheros sensibles).
+- Smart ports:
+  - planificación determinista antes de arrancar;
+  - reserva/liberación de puertos gestionados por Ducker;
+  - adaptación automática para patrones conocidos (Symfony `--port`, dev servers frontend);
+  - aviso explícito cuando no es seguro adaptar un comando.
 
 ## Stack
 

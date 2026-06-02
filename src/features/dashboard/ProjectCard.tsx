@@ -20,7 +20,7 @@ export function ProjectCard({ project, onDelete, onEdit, confirmRiskyCommands }:
     if (project.frontend?.id === commandId) setFrontendState(state);
   };
 
-  const runAction = async (action: () => Promise<void | CommandExecutionState>) => {
+  const runAction = async <T,>(action: () => Promise<T>) => {
     setError(null);
     try {
       const result = await action();
@@ -33,6 +33,10 @@ export function ProjectCard({ project, onDelete, onEdit, confirmRiskyCommands }:
 
   const runStart = async (commandId: string, risky?: boolean) => {
     if (risky && confirmRiskyCommands && !window.confirm('Este comando está marcado como riesgoso. ¿Continuar?')) return;
+    if (project.smartPortsEnabled) {
+      setError('Este proyecto tiene smart ports activado. Usa Work mode para lanzar el plan completo sin conflictos.');
+      return;
+    }
     const result = await runAction(() => startCommand(project.id, commandId));
     if (result) setCommandState(commandId, result);
   };
