@@ -18,6 +18,7 @@ pub fn load_projects<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Vec<Manage
     let data = fs::read_to_string(path).map_err(|e| e.to_string())?;
     let mut projects: Vec<ManagedProject> = serde_json::from_str(&data).map_err(|e| e.to_string())?;
     for project in &mut projects {
+        project.migrate_legacy();
         project.runtime = None;
     }
     Ok(projects)

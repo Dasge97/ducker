@@ -66,9 +66,13 @@ export type SmartLaunchPlan = {
   blocked: boolean;
 };
 
-export type ProjectUrls = {
-  backend?: string;
-  frontend?: string;
+export type ServiceConfig = {
+  id: string;
+  label: string;
+  kind: ServiceKind;
+  command: CommandConfig;
+  url?: string;
+  enabled: boolean;
 };
 
 export type ProjectDetection = {
@@ -77,6 +81,7 @@ export type ProjectDetection = {
   hasBinConsole: boolean;
   hasPackageJson: boolean;
   hasYarnLock: boolean;
+  detectedStacks: string[];
 };
 
 export type CommandStatus = 'idle' | 'starting' | 'running' | 'completed' | 'failed' | 'stopped';
@@ -91,17 +96,14 @@ export type CommandExecutionState = {
 };
 
 export type ProjectRuntimeState = {
-  backend?: CommandExecutionState;
-  frontend?: CommandExecutionState;
+  services: Record<string, CommandExecutionState>;
 };
 
 export type ManagedProject = {
   id: string;
   name: string;
   path: string;
-  backend?: CommandConfig;
-  frontend?: CommandConfig;
-  urls: ProjectUrls;
+  services: ServiceConfig[];
   detection: ProjectDetection;
   runtime?: ProjectRuntimeState;
   smartPortsEnabled?: boolean;
@@ -115,6 +117,5 @@ export type ManagedProject = {
 
 export type DetectProjectResult = {
   detection: ProjectDetection;
-  backend?: CommandConfig;
-  frontend?: CommandConfig;
+  services: ServiceConfig[];
 };

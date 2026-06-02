@@ -75,14 +75,14 @@ fn analyze_project_with_ai(app: tauri::AppHandle, path: String) -> Result<Analyz
     let settings = storage::load_settings(&app)?;
     let api_key = storage::load_ai_api_key(&app)?.ok_or("AI settings incomplete: missing API key")?;
     let snapshot = project_snapshot::collect_snapshot(&path, settings.ai.include_source_snippets)?;
-    ai_client::analyze_with_ai(&settings.ai, &api_key, snapshot)
+    ai_client::analyze_with_ai(&settings.ai, &api_key, snapshot, std::env::consts::OS, &processes::detect_tools())
 }
 
 #[tauri::command]
 fn analyze_project_snapshot_with_ai(app: tauri::AppHandle, snapshot: SnapshotSummary) -> Result<AnalyzeProjectWithAiResult, String> {
     let settings = storage::load_settings(&app)?;
     let api_key = storage::load_ai_api_key(&app)?.ok_or("AI settings incomplete: missing API key")?;
-    ai_client::analyze_with_ai(&settings.ai, &api_key, snapshot)
+    ai_client::analyze_with_ai(&settings.ai, &api_key, snapshot, std::env::consts::OS, &processes::detect_tools())
 }
 
 #[tauri::command]
@@ -108,11 +108,11 @@ fn start_smart_launch(state: tauri::State<'_, AppState>, app: tauri::AppHandle, 
     }
     let mut started = Vec::new();
     for service in &plan.services {
-        match processes::start_with_command(&state.process_state, &project_id, &service.command_id, &service.adapted_command) {
+        match processes::start_with_command(&state.process_state, &app, &project_id, &service.command_id, &service.adapted_command, &project.path) {
             Ok(_) => started.push(service.command_id.clone()),
             Err(error) => {
                 for command_id in started {
-                    let _ = processes::stop(&state.process_state, &projects, &project_id, &command_id);
+                    let _ = processes::stop(&state.process_state, &app, &projects, &project_id, &command_id);
                 }
                 port_planner::release_project(&project_id, &state.port_registry);
                 return Err(error);
@@ -125,13 +125,25 @@ fn start_smart_launch(state: tauri::State<'_, AppState>, app: tauri::AppHandle, 
 #[tauri::command]
 fn start_command(state: tauri::State<'_, AppState>, app: tauri::AppHandle, project_id: String, command_id: String) -> Result<CommandExecutionState, String> {
     let projects = storage::load_projects(&app)?;
-    processes::start(&state.process_state, &projects, &project_id, &command_id)
+    let project = projects.iter().find(|p| p.id == project_id).ok_or("Project not found")?;
+    // With smart ports on, an individual start must use the adapted (reassigned) port too,
+    // not just "Work mode" — otherwise it would clash on the original port.
+    if project.smart_ports_enabled == Some(true) {
+        let command = project.services.iter().map(|s| &s.command).find(|c| c.id == command_id).ok_or("Command not found")?;
+        let plan = port_planner::plan_command(&project.id, command, &state.port_registry, true);
+        if plan.blocked {
+            port_planner::release_command(&project_id, &command_id, &state.port_registry);
+            return Err(if plan.warnings.is_empty() { "Smart ports could not assign a port for this command".to_string() } else { plan.warnings.join(" ") });
+        }
+        return processes::start_with_command(&state.process_state, &app, &project_id, &command_id, &plan.adapted_command, &project.path);
+    }
+    processes::start(&state.process_state, &app, &projects, &project_id, &command_id)
 }
 
 #[tauri::command]
 fn stop_command(state: tauri::State<'_, AppState>, app: tauri::AppHandle, project_id: String, command_id: String) -> Result<CommandExecutionState, String> {
     let projects = storage::load_projects(&app)?;
-    let state_out = processes::stop(&state.process_state, &projects, &project_id, &command_id)?;
+    let state_out = processes::stop(&state.process_state, &app, &projects, &project_id, &command_id)?;
     port_planner::release_command(&project_id, &command_id, &state.port_registry);
     Ok(state_out)
 }

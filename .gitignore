@@ -27,3 +27,13 @@ Thumbs.db
 openspec/
 README_DEPLOY.md
 spec.md
+
+# Tauri (generado en build)
+/src-tauri/gen/
+
+# Iconos de móvil / Microsoft Store generados por `tauri icon`
+# (solo versionamos los iconos de escritorio que usa tauri.conf.json)
+/src-tauri/icons/android/
+/src-tauri/icons/ios/
+/src-tauri/icons/Square*Logo.png
+/src-tauri/icons/StoreLogo.png
